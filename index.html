@@ -1693,17 +1693,28 @@ function showToast(message, duration) {
 // 语音合成（Web Speech API + 在线TTS兜底）
 // ============================================
 
-// 全局音频播放器（在线TTS兜底用）
+// 全局音频播放器
 var _ttsAudio = null;
 
-// 在线TTS：统一用有道词典TTS（中英文都支持），百度做兜底
+// 尝试播放本地 MP3，失败回调 onError
+function playLocalAudio(path, onError) {
+  if (_ttsAudio) { _ttsAudio.pause(); _ttsAudio = null; }
+  _ttsAudio = new Audio(path);
+  _ttsAudio.onerror = function() { if (onError) onError(); };
+  _ttsAudio.onended = function() { _ttsAudio = null; };
+  var p = _ttsAudio.play();
+  if (p && p.catch) {
+    p.catch(function() { if (onError) onError(); });
+  }
+  return true;
+}
+
+// 在线TTS兜底：有道（支持中英文）+ 百度（中文兜底）
 function playOnlineTTS(text, lang) {
   if (_ttsAudio) { _ttsAudio.pause(); _ttsAudio = null; }
-  // 有道TTS支持中英文，英语模块已验证可用
   var url = 'https://dict.youdao.com/dictvoice?audio=' + encodeURIComponent(text) + '&type=2';
   _ttsAudio = new Audio(url);
   _ttsAudio.onerror = function() {
-    // 有道失败→百度TTS兜底（仅中文）
     if (!lang || !lang.toLowerCase().startsWith('en')) {
       _ttsAudio = new Audio('https://tts.baidu.com/text2audio?lan=zh&ie=UTF-8&spd=5&text=' + encodeURIComponent(text));
       _ttsAudio.play().catch(function() { showToast('🔇 语音加载失败，请检查网络~'); });
@@ -1715,12 +1726,31 @@ function playOnlineTTS(text, lang) {
 }
 
 function speakText(text, lang) {
-  // 清理特殊字符
   text = (text || '').replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').trim();
   if (!text) return;
   lang = lang || 'zh-CN';
 
-  // 尝试 Web Speech API（系统语音包可用时）
+  // 1) 英文单词优先使用本地音频（不依赖网络，微信内可用）
+  if (lang && lang.toLowerCase().startsWith('en')) {
+    var clean = text.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (clean && clean === text.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim()) {
+      var localPath = 'audio/en_' + clean + '.mp3';
+      var tryLocal = true;
+      playLocalAudio(localPath, function() {
+        if (tryLocal) {
+          tryLocal = false;
+          tryWebSpeechThenOnline(text, lang);
+        }
+      });
+      return;
+    }
+  }
+
+  tryWebSpeechThenOnline(text, lang);
+}
+
+function tryWebSpeechThenOnline(text, lang) {
+  // 2) 尝试 Web Speech API
   if ('speechSynthesis' in window && window.speechSynthesis) {
     var voices = window.speechSynthesis.getVoices();
     if (voices && voices.length > 0) {
@@ -1736,26 +1766,10 @@ function speakText(text, lang) {
         if (pv) u.voice = pv;
         setTimeout(function() { window.speechSynthesis.speak(u); }, 100);
         return;
-      } catch (err) { /* 出错则走在线TTS */ }
-    } else {
-      // 语音包可能异步加载，等800ms，超时就走在线TTS
-      var done = false;
-      window.speechSynthesis.addEventListener('voiceschanged', function once() {
-        window.speechSynthesis.removeEventListener('voiceschanged', once);
-        if (!done) {
-          done = true;
-          var v = window.speechSynthesis.getVoices();
-          if (v && v.length > 0) { speakText(text, lang); return; }
-          playOnlineTTS(text, lang);
-        }
-      }, { once: true });
-      setTimeout(function() {
-        if (!done) { done = true; playOnlineTTS(text, lang); }
-      }, 800);
-      return;
+      } catch (err) { /* 走在线TTS */ }
     }
   }
-  // Web Speech API 不可用，直接在线TTS
+  // 3) 在线TTS兜底
   playOnlineTTS(text, lang);
 }
 
@@ -1763,12 +1777,19 @@ if ('speechSynthesis' in window) {
   window.speechSynthesis.addEventListener('voiceschanged', function() {});
 }
 
-// 拼音专用朗读：只读括号里的汉字
+// 拼音专用朗读：优先播放本地预生成音频，失败再走在线TTS
 function speakPinyin(key, sound) {
-  var readText = '';
-  var m1 = sound.match(/[（(]([^）)]+)[）)]/);
-  if (m1) { readText = m1[1]; } else { readText = sound; }
-  speakText(readText, 'zh-CN');
+  var localPath = 'audio/pinyin_' + key + '.mp3';
+  var tryLocal = true;
+  playLocalAudio(localPath, function() {
+    if (tryLocal) {
+      tryLocal = false;
+      var readText = '';
+      var m1 = sound.match(/[（(]([^）)]+)[）)]/);
+      if (m1) { readText = m1[1]; } else { readText = sound; }
+      speakText(readText, 'zh-CN');
+    }
+  });
 }
 
 // ============================================
