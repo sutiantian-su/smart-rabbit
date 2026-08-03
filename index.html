@@ -1696,20 +1696,16 @@ function showToast(message, duration) {
 // 全局音频播放器（在线TTS兜底用）
 var _ttsAudio = null;
 
-// 在线TTS兜底：百度TTS(中文) / 有道词典TTS(英文)
+// 在线TTS：统一用有道词典TTS（中英文都支持），百度做兜底
 function playOnlineTTS(text, lang) {
   if (_ttsAudio) { _ttsAudio.pause(); _ttsAudio = null; }
-  var url;
-  if (lang && lang.toLowerCase().startsWith('en')) {
-    url = 'https://dict.youdao.com/dictvoice?audio=' + encodeURIComponent(text) + '&type=2';
-  } else {
-    url = 'https://tts.baidu.com/text2audio?lan=zh&ie=UTF-8&spd=5&text=' + encodeURIComponent(text);
-  }
+  // 有道TTS支持中英文，英语模块已验证可用
+  var url = 'https://dict.youdao.com/dictvoice?audio=' + encodeURIComponent(text) + '&type=2';
   _ttsAudio = new Audio(url);
   _ttsAudio.onerror = function() {
-    // 百度失败→尝试有道（中文也有有道发音）
+    // 有道失败→百度TTS兜底（仅中文）
     if (!lang || !lang.toLowerCase().startsWith('en')) {
-      _ttsAudio = new Audio('https://dict.youdao.com/dictvoice?audio=' + encodeURIComponent(text) + '&type=2');
+      _ttsAudio = new Audio('https://tts.baidu.com/text2audio?lan=zh&ie=UTF-8&spd=5&text=' + encodeURIComponent(text));
       _ttsAudio.play().catch(function() { showToast('🔇 语音加载失败，请检查网络~'); });
     } else {
       showToast('🔇 语音加载失败，请检查网络~');
